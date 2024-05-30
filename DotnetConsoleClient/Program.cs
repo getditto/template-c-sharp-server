@@ -4,6 +4,8 @@ using Program;
 
 public class App
 {
+    private const string DittoGetTasksQuery = $"SELECT * FROM {DittoTask.CollectionName} WHERE isDeleted = false";
+
     static Ditto ditto;
     static IDisposable dittoAuthObserver;
     static List<DittoTask> tasks = default!;
@@ -17,16 +19,14 @@ public class App
 
         Console.WriteLine("\nWelcome to Ditto's Task App");
 
-        string query = "SELECT * FROM tasks WHERE isDeleted == false";
+        ditto.Sync.RegisterSubscription(DittoGetTasksQuery);
 
-        ditto.Sync.RegisterSubscription(query);
-
-        ditto.Store.RegisterObserver(query, (result) =>
+        ditto.Store.RegisterObserver(DittoGetTasksQuery, (result) =>
         {
             tasks = result.Items.ConvertAll(item => JsonSerializer.Deserialize<DittoTask>(item.JsonString()));
         });
 
-        await ditto.Store.ExecuteAsync("EVICT FROM tasks WHERE isDeleted == true");
+        await ditto.Store.ExecuteAsync($"EVICT FROM {DittoTask.CollectionName} WHERE isDeleted == true");
 
         ListCommands();
 
@@ -116,7 +116,7 @@ public class App
 
     private static async Task HandleLoginCommand(string command)
     {
-        string password = command.Replace("--login ", "");
+        string password = command.Replace("--login ", "").Trim();
         await ditto.Auth.LoginWithToken(password, "provider");
     }
 
@@ -128,30 +128,37 @@ public class App
     private static async Task HandleInsertCommand(string command)
     {
         string taskBody = command.Replace("--insert ", "");
-        var task = new DittoTask(taskBody, false).ToDictionary();
-        await ditto.Store.ExecuteAsync("INSERT INTO tasks DOCUMENTS (:task)", new Dictionary<string, object> { { "task", task } });
+        var task = new DittoTask(taskBody, false);
+        await ditto.Store.ExecuteAsync($"INSERT INTO {DittoTask.CollectionName} DOCUMENTS (:task)", new Dictionary<string, object>
+        {
+            { "task", task.ToDictionary() }
+        });
     }
 
     private static async Task HandleToggleCommand(string command)
     {
-        string idToToggle = command.Replace("--toggle ", "");
-        var isCompleted = tasks.First(t => t.Id == idToToggle).IsCompleted;
-        await ditto.Store.ExecuteAsync(
-            "UPDATE tasks " +
-            "SET isCompleted = :newValue " +
-            "WHERE _id == :id",
-            new Dictionary<string, object> { { "newValue", !isCompleted }, { "id", idToToggle } });
+        string idToToggle = command.Replace("--toggle ", "").Trim();
+        try
+        {
+            var isCompleted = tasks.First(t => t.Id == idToToggle).IsCompleted;
+            await ditto.Store.ExecuteAsync(
+                $"UPDATE {DittoTask.CollectionName} " +
+                $"SET isCompleted = {!isCompleted} " +
+                $"WHERE _id == '{idToToggle}'");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Could not complete command: {e.Message}\n{e.StackTrace}");
+        }
     }
 
     private static async Task HandleDeleteCommand(string command)
     {
-        string idToDelete = command.Replace("--delete ", "");
-        var isDeleted = tasks.First(t => t.Id == idToDelete).IsDeleted;
+        string idToDelete = command.Replace("--delete ", "").Trim();
         await ditto.Store.ExecuteAsync(
-            "UPDATE tasks " +
-            "SET isDeleted = :newValue " +
-            "WHERE _id == :id",
-            new Dictionary<string, object> { { "newValue", !isDeleted }, { "id", idToDelete } });
+            $"UPDATE {DittoTask.CollectionName} " +
+            $"SET isDeleted = true " +
+            $"WHERE _id == '{idToDelete}'");
     }
 
     private static void HandleListTasksCommand()

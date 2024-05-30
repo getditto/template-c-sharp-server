@@ -4,6 +4,8 @@ namespace Program;
 
 public struct DittoTask(string body, bool isCompleted)
 {
+    public const string CollectionName = "tasks";
+    
     [JsonPropertyName("_id")]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
